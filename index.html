@@ -4838,18 +4838,18 @@ function showDetail(id) {
   const srcLabel = CONFIG.labels.source[item.sourceType] || item.sourceType || '其他';
 
   document.getElementById('modal-body').innerHTML = `
-    <div class="detail-row"><div class="detail-label">发布时间</div><div class="detail-value">${item.date}${item.publishTime && item.publishTime !== item.date ? ' ' + item.publishTime.slice(11) : ''}</div></div>
+    <div class="detail-row"><div class="detail-label">发布时间</div><div class="detail-value">${item.publishTime || item.date || '未知'}</div></div>
     <div class="detail-row"><div class="detail-label">来源渠道</div><div class="detail-value">${srcLabel}</div></div>
-    <div class="detail-row"><div class="detail-label">发布者</div><div class="detail-value">${item.source}</div></div>
+    <div class="detail-row"><div class="detail-label">发布者</div><div class="detail-value">${item.source || item.author || '未知'}</div></div>
     <div class="detail-row"><div class="detail-label">类别</div><div class="detail-value"><span class="tag ${catClass}">${catLabel}</span></div></div>
     <div class="detail-row"><div class="detail-label">情感倾向</div><div class="detail-value"><span class="tag tag-sentiment-${item.sentiment}">${getSentimentLabel(item.sentiment)}</span></div></div>
     <div class="detail-row"><div class="detail-label">热度</div><div class="detail-value"><span style="font-weight:600;color:var(--gold);"><svg class="icon icon-fire" viewBox="0 0 24 24"><path d="M13.5.67s.74 2.65.74 4.8c0 2.06-1.35 3.73-3.41 3.73-2.07 0-3.63-1.67-3.63-3.73l.03-.36C5.21 7.51 4 10.62 4 14c0 4.42 3.58 8 8 8s8-3.58 8-8C20 8.61 17.41 3.8 13.5.67zM11.71 19c-1.78 0-3.22-1.4-3.22-3.14 0-1.62 1.05-2.76 2.81-3.12 1.77-.36 3.6-1.21 4.62-2.58.39 1.29.59 2.65.59 4.04 0 2.65-2.15 4.8-4.8 4.8z"/></svg> ${item.heatScore || 0}</span> <span style="color:var(--text-dim);font-size:12px;">(<svg class="icon icon-like" viewBox="0 0 24 24"><path d="M1 21h4V9H1v12zm22-11c0-1.1-.9-2-2-2h-6.31l.95-4.57.03-.32c0-.41-.17-.79-.44-1.06L14.17 1 7.59 7.59C7.22 7.95 7 8.45 7 9v10c0 1.1.9 2 2 2h9c.83 0 1.54-.5 1.84-1.22l3.02-7.05c.09-.23.14-.47.14-.73v-2z"/></svg>${item.likes || 0} <svg class="icon icon-comment" viewBox="0 0 24 24"><path d="M21 6h-2v9H6v2c0 .55.45 1 1 1h11l4 4V7c0-.55-.45-1-1-1zm-4 6V3c0-.55-.45-1-1-1H3c-.55 0-1 .45-1 1v14l4-4h10c.55 0 1-.45 1-1z"/></svg>${item.comments || 0} <svg class="icon icon-star" viewBox="0 0 24 24"><path d="M12 17.27L18.18 21l-1.64-7.03L22 9.24l-7.19-.61L12 2 9.19 8.63 2 9.24l5.46 4.73L5.82 21z"/></svg>${item.favorites || 0})</span></div></div>
     <div class="detail-row"><div class="detail-label">关键词</div><div class="detail-value">${kwHtml}</div></div>
-    <div class="detail-row"><div class="detail-label">标题</div><div class="detail-value" style="font-weight:600;">${item.title}</div></div>
+    <div class="detail-row"><div class="detail-label">标题</div><div class="detail-value" style="font-weight:600;">${item.title || '无标题'}</div></div>
     <div class="detail-row"><div class="detail-label">内容详情</div></div>
     <div class="detail-content">${item.content}</div>
     <div class="detail-row" style="margin-top:20px;"><div class="detail-label">原文链接</div><div class="detail-value"><a href="${item.url}" target="_blank" class="link-btn">${item.url}</a></div></div>
-    <div class="detail-row"><div class="detail-label">处理状态</div><div class="detail-value">${item.status}</div></div>
+    <div class="detail-row"><div class="detail-label">处理状态</div><div class="detail-value">${item.status || '待处理'}</div></div>
     ${amountHtml}
     <div style="margin-top:24px;padding-top:20px;border-top:1px solid var(--border);">
       <div style="font-size:12px;font-weight:600;color:var(--text-dim);letter-spacing:0.1em;text-transform:uppercase;margin-bottom:16px;">舆情处理时间线</div>
