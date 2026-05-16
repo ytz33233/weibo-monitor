@@ -159,3 +159,43 @@ def export_json(db: Database, output_path: str = None) -> str:
         json.dump(export, f, ensure_ascii=False, indent=2, default=str)
     logger.info(f"JSON 导出成功: {output_path}")
     return output_path
+
+
+def export_daily_json(db: Database, date_str: str = None) -> str:
+    """导出每日数据到 data/YYYY-MM-DD.json，供前端展示使用"""
+    if not date_str:
+        date_str = datetime.now().strftime("%Y-%m-%d")
+
+    output_path = os.path.join(os.path.dirname(config.DB_PATH), f"{date_str}.json")
+
+    # 获取当日数据
+    all_data = db.query(start_date=date_str, end_date=date_str)
+
+    # 计算统计数据
+    summary = {
+        "total": len(all_data),
+        "negativeCount": sum(1 for r in all_data if r.get("sentiment") == "negative"),
+        "positiveCount": sum(1 for r in all_data if r.get("sentiment") == "positive"),
+        "neutralCount": sum(1 for r in all_data if r.get("sentiment") == "neutral"),
+    }
+
+    # 按来源统计
+    by_source = {}
+    for r in all_data:
+        src = r.get("sourceType", "unknown")
+        by_source[src] = by_source.get(src, 0) + 1
+
+    # 构建前端所需的数据格式
+    export = {
+        "reportDate": date_str,
+        "generatedAt": datetime.now().isoformat(),
+        "summary": summary,
+        "bySource": by_source,
+        "records": all_data,
+    }
+
+    with open(output_path, "w", encoding="utf-8") as f:
+        json.dump(export, f, ensure_ascii=False, indent=2, default=str)
+
+    logger.info(f"每日 JSON 导出成功: {output_path}")
+    return output_path

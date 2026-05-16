@@ -51,6 +51,9 @@ def run_collection():
     try:
         export_excel(db)
         export_json(db)
+        # 新增：导出每日数据供前端使用
+        from storage.exporter import export_daily_json
+        export_daily_json(db)
         logger.info("自动导出完成")
     except Exception as e:
         logger.error(f"自动导出失败: {e}")

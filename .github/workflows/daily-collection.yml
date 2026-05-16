@@ -1,0 +1,247 @@
+name: Daily Sentiment Collection
+
+on:
+  schedule:
+    # 每天 UTC 01:00 和 10:00 运行（对应北京时间 09:00 和 18:00）
+    - cron: '0 1,10 * * *'
+  workflow_dispatch:  # 支持手动触发
+
+permissions:
+  contents: write
+  pages: write
+  id-token: write
+
+concurrency:
+  group: "collection"
+  cancel-in-progress: false
+
+jobs:
+  collect:
+    runs-on: ubuntu-latest
+    
+    steps:
+      # ==================== 1. 检出代码 ====================
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # 获取完整历史，用于数据库文件追溯
+      
+      # ==================== 2. 设置 Python 环境 ====================
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+      
+      # ==================== 3. 安装 Python 依赖 ====================
+      - name: Install Python dependencies
+        run: |
+          pip install -r requirements.txt
+      
+      # ==================== 4. 设置 Node.js 环境（微博 MCP） ====================
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      
+      # ==================== 5. 安装微博 MCP Server ====================
+      - name: Install Weibo MCP Server
+        run: |
+          # 创建 MCP 服务器目录
+          mkdir -p mcp-servers/weibo
+          cd mcp-servers/weibo
+          
+          # 克隆微博 MCP 仓库
+          git clone --depth 1 https://github.com/Selenium39/mcp-server-weibo.git .
+          npm install
+          npm run build
+          
+          echo "WEIBO_MCP_PATH=$(pwd)/dist/index.js" >> $GITHUB_ENV
+      
+      # ==================== 6. 安装小红书 MCP Server ====================
+      - name: Install XHS MCP Server
+        run: |
+          # 创建 Python 虚拟环境用于小红书 MCP
+          python -m venv mcp-servers/xhs-env
+          source mcp-servers/xhs-env/bin/activate
+          
+          pip install xiaohongshu-mcp-server
+          
+          # 保存环境路径
+          echo "XHS_ENV_PATH=$(pwd)/mcp-servers/xhs-env" >> $GITHUB_ENV
+          echo "XHS_MCP_PORT=18060" >> $GITHUB_ENV
+      
+      # ==================== 7. 运行数据采集 ====================
+      - name: Run data collection
+        id: collection
+        timeout-minutes: 30
+        run: |
+          # 启动小红书 MCP 服务（后台运行）
+          source $XHS_ENV_PATH/bin/activate
+          xhs-mcp --transport http --port $XHS_MCP_PORT &
+          XHS_PID=$!
+          
+          # 等待小红书服务启动
+          echo "Waiting for XHS MCP server to start..."
+          for i in {1..30}; do
+            if curl -s http://127.0.0.1:$XHS_MCP_PORT/mcp > /dev/null 2>&1; then
+              echo "XHS MCP server is ready!"
+              break
+            fi
+            sleep 2
+          done
+          
+          # 验证服务状态
+          curl -s http://127.0.0.1:$XHS_MCP_PORT/mcp || echo "Warning: XHS MCP health check failed"
+          
+          # 设置环境变量并运行采集
+          export WEIBO_MCP_ARGS="$WEIBO_MCP_PATH"
+          export XHS_MCP_URL="http://127.0.0.1:$XHS_MCP_PORT/mcp"
+          
+          # 运行采集脚本
+          python run_collection.py 2>&1 | tee collection.log
+          
+          # 保存退出码
+          COLLECTION_EXIT_CODE=$?
+          
+          # 停止小红书服务
+          kill $XHS_PID 2>/dev/null || true
+          
+          # 输出统计信息
+          echo "=== Collection Summary ==="
+          echo "Exit code: $COLLECTION_EXIT_CODE"
+          echo "Data files generated:"
+          ls -la data/*.json 2>/dev/null || echo "No JSON files found"
+          
+          exit $COLLECTION_EXIT_CODE
+      
+      # ==================== 8. 处理采集结果 ====================
+      - name: Process collection results
+        id: process
+        run: |
+          # 检查是否有新生成的数据文件
+          NEW_FILES=$(find data -name "*.json" -newer .git/index 2>/dev/null || echo "")
+          
+          if [ -n "$NEW_FILES" ]; then
+            echo "has_new_data=true" >> $GITHUB_OUTPUT
+            echo "new_files<<EOF" >> $GITHUB_OUTPUT
+            echo "$NEW_FILES" >> $GITHUB_OUTPUT
+            echo "EOF" >> $GITHUB_OUTPUT
+            
+            # 生成数据摘要
+            echo "=== Data Summary ==="
+            for file in $NEW_FILES; do
+              echo "File: $file"
+              python -c "
+import json
+try:
+    with open('$file', 'r', encoding='utf-8') as f:
+        data = json.load(f)
+        if 'summary' in data:
+            print(f'  Records: {data[\"summary\"].get(\"total\", 0)}')
+            print(f'  Negative: {data[\"summary\"].get(\"negativeCount\", 0)}')
+        elif isinstance(data, list):
+            print(f'  Records: {len(data)}')
+except Exception as e:
+    print(f'  Error reading file: {e}')
+              "
+            done
+          else
+            echo "has_new_data=false" >> $GITHUB_OUTPUT
+          fi
+      
+      # ==================== 9. 提交数据文件到仓库 ====================
+      - name: Commit data files
+        if: steps.process.outputs.has_new_data == 'true'
+        run: |
+          git config --local user.email "github-actions[bot]@users.noreply.github.com"
+          git config --local user.name "github-actions[bot]"
+          
+          # 添加数据文件
+          git add data/*.json
+          git add data/sentiment_monitor.db || true
+          
+          # 检查是否有变更
+          if git diff --cached --quiet; then
+            echo "No changes to commit"
+            exit 0
+          fi
+          
+          # 提交变更
+          DATE_STR=$(date +'%Y-%m-%d')
+          git commit -m "chore: daily sentiment collection for $DATE_STR [skip ci]
+          
+Auto-generated data files:
+$(echo '${{ steps.process.outputs.new_files }}' | sed 's/^/  - /')
+          
+Workflow run: ${{ github.run_id }}"
+          
+          # 推送变更
+          git push
+      
+      # ==================== 10. 上传日志和导出文件 ====================
+      - name: Upload artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: collection-logs-${{ github.run_id }}
+          path: |
+            collection.log
+            data/exports/
+            data/sentiment_monitor.db
+          retention-days: 7
+      
+      # ==================== 11. 错误通知 ====================
+      - name: Notify on failure
+        if: failure()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const issueTitle = `Collection failed: ${new Date().toISOString().split('T')[0]}`;
+            const issueBody = `
+            ## Daily Sentiment Collection Failed
+            
+            **Workflow:** ${{ github.workflow }}
+            **Run ID:** ${{ github.run_id }}
+            **Run URL:** ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+            
+            ### Error Details
+            Please check the workflow logs for more information.
+            
+            ### Manual Recovery
+            1. Go to Actions tab
+            2. Find the failed workflow run
+            3. Click "Re-run jobs" to retry
+            
+            ---
+            *This issue was automatically created by GitHub Actions.*
+            `;
+            
+            console.log('Collection failed. Check logs for details.');
+            console.log('Issue would be created:', issueTitle);
+
+  # ==================== 12. 部署到 GitHub Pages ====================
+  deploy:
+    needs: collect
+    if: always() && (needs.collect.result == 'success' || needs.collect.result == 'skipped')
+    runs-on: ubuntu-latest
+    
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      
+      - name: Setup Pages
+        uses: actions/configure-pages@v5
+      
+      - name: Upload artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: '.'  # 上传整个项目目录
+      
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
