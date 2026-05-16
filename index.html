@@ -3735,7 +3735,16 @@ function renderSummary() {
   const brief = loadedData.dailyBrief;
   if (brief && brief.text) {
     body.innerHTML = brief.text;
-    const genTime = brief.generatedAt ? brief.generatedAt.slice(0, 16).replace('T', ' ') : brief.date;
+    // UTC 时间转北京时间（UTC+8）
+    let genTime = brief.date;
+    if (brief.generatedAt) {
+      const utcDate = new Date(brief.generatedAt);
+      if (!isNaN(utcDate.getTime())) {
+        const beijingHours = String(utcDate.getUTCHours() + 8).padStart(2, '0');
+        const beijingMinutes = String(utcDate.getUTCMinutes()).padStart(2, '0');
+        genTime = brief.generatedAt.slice(0, 10) + ' ' + beijingHours + ':' + beijingMinutes;
+      }
+    }
     meta.textContent = '简报日期：' + brief.date + ' · 生成于 ' + genTime;
     card.style.display = "block";
     return;
