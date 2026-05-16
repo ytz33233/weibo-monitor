@@ -50,19 +50,22 @@ jobs:
       
       - name: Install XHS MCP Server
         run: |
-          python -m venv mcp-servers/xhs-env
-          source mcp-servers/xhs-env/bin/activate
-          pip install xiaohongshu-mcp-server
-          echo "XHS_ENV_PATH=$(pwd)/mcp-servers/xhs-env" >> $GITHUB_ENV
+          mkdir -p mcp-servers/xhs
+          cd mcp-servers/xhs
+          npm init -y
+          npm install xiaohongshu-mcp
+          echo "XHS_MCP_PATH=$(pwd)/node_modules/xiaohongshu-mcp" >> $GITHUB_ENV
           echo "XHS_MCP_PORT=18060" >> $GITHUB_ENV
       
       - name: Run data collection
         id: collection
         timeout-minutes: 30
         run: |
-          source $XHS_ENV_PATH/bin/activate
-          xhs-mcp --transport http --port $XHS_MCP_PORT &
+          # 启动小红书 MCP 服务（后台运行）
+          cd mcp-servers/xhs
+          npx xiaohongshu-mcp --transport http --port $XHS_MCP_PORT &
           XHS_PID=$!
+          cd ../..
           
           echo "Waiting for XHS MCP server to start..."
           for i in {1..30}; do
