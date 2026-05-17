@@ -3759,7 +3759,7 @@ function renderSummary() {
 
   // fallback：基于今日实际采集数据动态生成简报
   const todayRecords = (loadedData.records || []).filter(r => {
-    const ft = (r.fetchTime || '').toString().slice(0, 10);
+    const ft = (r.fetchTime || r.collectedAt || '').toString().slice(0, 10);
     const today = loadedData.dateRangeEnd || loadedData.reportDate;
     return ft === today || ft.startsWith(today);
   });
@@ -4539,6 +4539,21 @@ function renderTable() {
         <td><a href="javascript:void(0)" class="link-btn" onclick="showDetail(${globalIdx})">详情</a></td>
       </tr>`;
   }).join('');
+
+  renderPagination(total);
+  renderMobileCards(pageData);
+  renderMobilePagination(total);
+}
+
+function renderPagination(total) {
+  const totalPages = Math.ceil(total / CONFIG.pageSize);
+  const container = document.getElementById('pagination');
+
+  if (totalPages <= 1) {
+    container.innerHTML = '';
+    return;
+  }
+
   let html = `<button class="page-btn" onclick="changePage(-1)" ${currentPage === 1 ? 'disabled' : ''}>上一页</button>`;
   for (let i = 1; i <= totalPages; i++) {
     html += `<button class="page-btn ${i === currentPage ? 'active' : ''}" onclick="goToPage(${i})">${i}</button>`;
