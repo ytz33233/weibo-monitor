@@ -3506,10 +3506,17 @@ async function loadByRange(startStr, endStr) {
 
   let allRecords = [];
   let allHotKeywords = [];
+  // 为没有 collectedAt 的记录自动填充文件日期作为采集日期
+  // 这样 renderSummary 能正确识别"今天"的数据
   for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
     const dateStr = formatDate(d);
     const data = await fetchJson(dateStr);
     if (data && data.records && data.records.length) {
+      data.records.forEach(function(r) {
+        if (!r.collectedAt || !r.collectedAt.toString().slice(0, 10)) {
+          r.collectedAt = dateStr;
+        }
+      });
       allRecords = allRecords.concat(data.records);
       // 合并热词
       (data.hotKeywords || []).forEach(k => {
@@ -3539,13 +3546,6 @@ async function loadByRange(startStr, endStr) {
   const stats = computeStats(uniqueRecords);
   const trend = computeTrend(uniqueRecords, startStr, endStr);
 
-  // 单独获取最新日期的 dailyBrief（每日简报）
-  let dailyBrief = null;
-  const latestData = await fetchJson(endStr);
-  if (latestData && latestData.dailyBrief) {
-    dailyBrief = latestData.dailyBrief;
-  }
-
   loadedData = {
     reportDate: `${startStr} ~ ${endStr}`,
     dateRangeStart: startStr,
@@ -3557,8 +3557,7 @@ async function loadByRange(startStr, endStr) {
     byRisk: stats.byRisk,
     byProduct: stats.byProduct,
     trend7d: trend,
-    hotKeywords: allHotKeywords,
-    dailyBrief: dailyBrief
+    hotKeywords: allHotKeywords
   };
 
   // 应用当前筛选条件并刷新 UI
@@ -3738,82 +3737,120 @@ function renderSummary() {
   const body = document.getElementById("summary-body");
   const meta = document.getElementById("summary-meta");
 
-  // 优先使用每日简报（当天数据）
-  const brief = loadedData.dailyBrief;
-  if (brief && brief.text) {
-    body.innerHTML = brief.text;
-    // UTC 时间转北京时间（UTC+8）
-    let genTime = brief.date;
-    if (brief.generatedAt) {
-      const utcDate = new Date(brief.generatedAt);
-      if (!isNaN(utcDate.getTime())) {
-        const beijingHours = String(utcDate.getUTCHours() + 8).padStart(2, '0');
-        const beijingMinutes = String(utcDate.getUTCMinutes()).padStart(2, '0');
-        genTime = brief.generatedAt.slice(0, 10) + ' ' + beijingHours + ':' + beijingMinutes;
-      }
-    }
-    meta.textContent = '简报日期：' + brief.date + ' · 生成于 ' + genTime;
-    card.style.display = "block";
-    return;
-  }
+  const records = loadedData.records || [];
+  if (!records.length) { card.style.display = "none"; return; }
 
-  // fallback：基于今日实际采集数据动态生成简报
-  const todayRecords = (loadedData.records || []).filter(r => {
-    const ft = (r.fetchTime || r.collectedAt || '').toString().slice(0, 10);
-    const today = loadedData.dateRangeEnd || loadedData.reportDate;
-    return ft === today || ft.startsWith(today);
+  const today = getTodayBeijing();
+  const rangeEnd = loadedData.dateRangeEnd || today;
+
+  // 筛选今日数据（基于 collectedAt / fetchTime / 数据文件日期）
+  const todayRecords = records.filter(r => {
+    const ft = (r.collectedAt || r.fetchTime || '').toString().slice(0, 10);
+    return ft === today;
   });
   const todayTotal = todayRecords.length;
-  const total = (loadedData.records || []).length;
-  if (!loadedData.records || !loadedData.records.length) { card.style.display = "none"; return; }
+  const total = records.length;
 
-  const s = loadedData.summary || {};
-  const neg = s.negativeCount || 0;
-  const pos = s.positiveCount || 0;
-  const neu = s.neutralCount || 0;
-  const recent = s.recentCount || 0;
+  // 统计今日情感分布
+  const todayNeg = todayRecords.filter(r => r.sentiment === 'negative').length;
+  const todayPos = todayRecords.filter(r => r.sentiment === 'positive').length;
+  const todayNeu = todayRecords.filter(r => r.sentiment === 'neutral').length;
 
-  const kwMap = {};
-  todayRecords.forEach(r => { (r.keywords || []).forEach(k => { kwMap[k] = (kwMap[k] || 0) + 1; }); });
-  const topKw = Object.entries(kwMap).sort((a, b) => b[1] - a[1]).slice(0, 3).map(x => x[0]);
-
+  // 统计今日来源
   const srcMap = {};
   todayRecords.forEach(r => { srcMap[r.sourceType] = (srcMap[r.sourceType] || 0) + 1; });
-  const topSrc = Object.entries(srcMap).sort((a, b) => b[1] - a[1]).slice(0, 2).map(x => CONFIG.labels.source[x[0]] || x[0]);
+  const topSrc = Object.entries(srcMap).sort((a, b) => b[1] - a[1]).slice(0, 3).map(x => CONFIG.labels.source[x[0]] || x[0]);
 
-  const prodMap = {};
-  todayRecords.forEach(r => { const p = r.relatedProduct || "其他"; prodMap[p] = (prodMap[p] || 0) + 1; });
-  const topProd = Object.entries(prodMap).sort((a, b) => b[1] - a[1]).slice(0, 2).map(x => x[0]);
+  // 统计今日关键词（优先 searchKeyword，其次 keywords）
+  const kwMap = {};
+  todayRecords.forEach(r => {
+    const kws = (r.searchKeyword && r.searchKeyword.trim()) ? [r.searchKeyword.trim()] : (r.keywords || []);
+    kws.forEach(k => { kwMap[k] = (kwMap[k] || 0) + 1; });
+  });
+  const topKw = Object.entries(kwMap).sort((a, b) => b[1] - a[1]).slice(0, 5).map(x => x[0]);
 
-  let text = "";
+  // 统计今日分类
+  const catMap = {};
+  todayRecords.forEach(r => { const c = r.category || '其他'; catMap[c] = (catMap[c] || 0) + 1; });
+  const topCat = Object.entries(catMap).sort((a, b) => b[1] - a[1]).slice(0, 3).map(x => CONFIG.labels.category[x[0]] || x[0]);
+
+  // 找出今日高互动帖子（likes + comments + favorites 最高的前3条）
+  const topPosts = todayRecords.slice().sort((a, b) => {
+    const scoreA = (a.likes || 0) + (a.comments || 0) + (a.favorites || 0);
+    const scoreB = (b.likes || 0) + (b.comments || 0) + (b.favorites || 0);
+    return scoreB - scoreA;
+  }).slice(0, 3);
+
+  // 统计全量数据的情感
+  const allNeg = records.filter(r => r.sentiment === 'negative').length;
+  const allPos = records.filter(r => r.sentiment === 'positive').length;
+
+  // 获取最新数据时间
+  const now = new Date();
+  const beijingOffset = 8 * 60;
+  const utc = now.getTime() + now.getTimezoneOffset() * 60000;
+  const beijingNow = new Date(utc + beijingOffset * 60000);
+  const timeStr = String(beijingNow.getHours()).padStart(2, '0') + ':' + String(beijingNow.getMinutes()).padStart(2, '0');
+
+  // 生成简报文本
+  let text = '';
+
   if (todayTotal === 0 && total === 0) {
-    text = "今日暂无相关舆情数据。";
+    text = '📊 <strong>' + today + '</strong> 舆情日报<br><br>今日暂无相关舆情数据。系统将持续监控中。';
   } else if (todayTotal === 0 && total > 0) {
-    text = "今日无新增舆情，当前展示 <strong>" + total + "</strong> 条历史持续舆情。";
+    text = '📊 <strong>' + today + '</strong> 舆情日报<br><br>';
+    text += '今日无新增采集数据。当前共监测 <strong>' + total + '</strong> 条历史舆情';
+    if (allNeg > 0) text += '，其中负面舆情 <strong>' + allNeg + '</strong> 条需关注';
+    text += '。';
+    if (topKw.length > 0) text += '<br>持续关注热词：' + topKw.map(k => '「' + k + '」').join(' ');
   } else {
-    text = "今日共采集 <strong>" + todayTotal + "</strong> 条舆情";
-    const todayNeg = todayRecords.filter(r => r.sentiment === 'negative').length;
-    const todayPos = todayRecords.filter(r => r.sentiment === 'positive').length;
-    const todayNeu = todayRecords.filter(r => r.sentiment === 'neutral').length;
-    if (todayNeg > 0) text += "，其中负面 <strong>" + todayNeg + "</strong> 条";
-    if (todayPos > 0) text += "，正面 " + todayPos + " 条";
-    if (todayNeu > 0) text += "，中性 " + todayNeu + " 条";
-    text += "。";
-    if (recent > 0) text += "24小时内新增 <strong>" + recent + "</strong> 条。";
-    if (topProd.length > 0) text += "主要集中在「" + topProd.join("、") + "」等产品";
-    if (topSrc.length > 0) text += "，来源以" + topSrc.join("、") + "为主";
-    if (topKw.length > 0) text += "，热词包括「" + topKw.join("、") + "」";
-    text += "。";
+    text = '📊 <strong>' + today + '</strong> 舆情日报<br><br>';
+    text += '今日新增采集 <strong>' + todayTotal + '</strong> 条舆情';
+    if (todayNeg > 0) text += '，其中 <span style="color:#c41e3a;font-weight:bold">负面 ' + todayNeg + ' 条</span>';
+    if (todayPos > 0) text += '，<span style="color:#4caf50">正面 ' + todayPos + ' 条</span>';
+    if (todayNeu > 0) text += '，中性 ' + todayNeu + ' 条';
+    text += '。';
+    text += '累计监测 <strong>' + total + '</strong> 条。';
+
+    if (topSrc.length > 0) {
+      text += '<br>📌 数据来源：' + topSrc.join('、');
+    }
+    if (topCat.length > 0) {
+      text += '<br>🏷️ 主要分类：' + topCat.join('、');
+    }
+    if (topKw.length > 0) {
+      text += '<br>🔥 今日热词：' + topKw.map(k => '「' + k + '」').join(' ');
+    }
+
+    // 高互动帖子
+    if (topPosts.length > 0 && (topPosts[0].likes || 0) + (topPosts[0].comments || 0) + (topPosts[0].favorites || 0) > 0) {
+      text += '<br><br>💬 <strong>热门互动：</strong>';
+      topPosts.forEach(function(p, i) {
+        const engagement = (p.likes || 0) + (p.comments || 0) + (p.favorites || 0);
+        const src = CONFIG.labels.source[p.sourceType] || p.sourceType || '';
+        const title = (p.title || '').length > 25 ? (p.title || '').slice(0, 25) + '…' : (p.title || '');
+        text += '<br>' + (i + 1) + '. [' + src + '] ' + title;
+        text += ' <span style="color:var(--text-dim);font-size:12px;">(👍' + (p.likes || 0) + ' 💬' + (p.comments || 0) + ')</span>';
+      });
+    }
+
+    // 负面预警
+    if (todayNeg > 0) {
+      const negPosts = todayRecords.filter(r => r.sentiment === 'negative').slice(0, 2);
+      text += '<br><br>⚠️ <strong>负面预警（' + todayNeg + '条）：</strong>';
+      negPosts.forEach(function(p) {
+        const title = (p.title || '').length > 30 ? (p.title || '').slice(0, 30) + '…' : (p.title || '');
+        text += '<br>· ' + title;
+      });
+      if (todayNeg > 2) text += '<br>· …等共 ' + todayNeg + ' 条';
+    }
   }
 
   body.innerHTML = text;
-  const srcNames = Object.keys(srcMap).map(k => CONFIG.labels.source[k] || k).join('、');
-  let updateTime = loadedData.reportDate || '';
-  if (updateTime.includes('~')) {
-    updateTime = updateTime.split('~').pop().trim();
-  }
-  updateTime = '更新至 ' + updateTime + ' 15:30:00';
-  meta.textContent = updateTime + ' · 渠道：' + srcNames;
+
+  // 元信息
+  const srcNames = Object.keys(srcMap).map(k => CONFIG.labels.source[k] || k).join('、') || '暂无';
+  meta.textContent = today + ' ' + timeStr + ' 更新 · 数据来源：' + srcNames;
   card.style.display = "block";
 }
 
@@ -5305,6 +5342,10 @@ document.addEventListener('DOMContentLoaded', function() {
   const monthRecords = fbRecords.filter(function(r) {
     var d = (r.date || r.publishTime || '').toString().slice(0, 10);
     return d >= daysAgoStr && d <= todayStr;
+  });
+  // 为 fallback 记录填充 collectedAt（使用舆情发生日期）
+  monthRecords.forEach(function(r) {
+    if (!r.collectedAt) r.collectedAt = (r.date || r.publishTime || '').toString().slice(0, 10);
   });
 
   if (monthRecords.length > 0) {
