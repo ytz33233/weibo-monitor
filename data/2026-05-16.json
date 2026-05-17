@@ -1,0 +1,17 @@
+{
+  "reportDate": "2026-05-16",
+  "generatedAt": "2026-05-16T17:16:03.911607",
+  "dailyBrief": {
+    "text": "今日（2026-05-16）共采集 0 条舆情，整体态势平稳，无重大负面舆情",
+    "date": "2026-05-16",
+    "generatedAt": "2026-05-16T17:16:03.911613"
+  },
+  "summary": {
+    "total": 0,
+    "negativeCount": 0,
+    "positiveCount": 0,
+    "neutralCount": 0
+  },
+  "bySource": {},
+  "records": []
+}
