@@ -3743,26 +3743,37 @@ function renderSummary() {
   const today = getTodayBeijing();
   const rangeEnd = loadedData.dateRangeEnd || today;
 
-  // 筛选今日数据（基于 collectedAt / fetchTime / 数据文件日期）
-  const todayRecords = records.filter(r => {
-    const ft = (r.collectedAt || r.fetchTime || '').toString().slice(0, 10);
-    return ft === today;
+  // 获取当前日期范围筛选条件（和表格保持一致）
+  const startStr = document.getElementById('filter-date-start').value;
+  const endStr = document.getElementById('filter-date-end').value;
+
+  // 筛选符合日期范围的数据（使用 d.date，和表格保持一致）
+  const filteredRecords = records.filter(r => {
+    const rDate = (r.date || '').toString().slice(0, 10);
+    if (startStr && rDate && rDate < startStr) return false;
+    if (endStr && rDate && rDate > endStr) return false;
+    return true;
+  });
+
+  // 近30日数据：使用日期筛选后的数据
+  const recent30Total = filteredRecords.length;
+
+  // 统计近30日情感分布
+  const recent30Neg = filteredRecords.filter(r => r.sentiment === 'negative').length;
+  const recent30Pos = filteredRecords.filter(r => r.sentiment === 'positive').length;
+  const recent30Neu = filteredRecords.filter(r => r.sentiment === 'neutral').length;
+
+  // 筛选今日数据（基于 d.date，和表格保持一致）
+  const todayRecords = filteredRecords.filter(r => {
+    const rDate = (r.date || '').toString().slice(0, 10);
+    return rDate === today;
   });
   const todayTotal = todayRecords.length;
-
-  // 近30日数据：直接使用当前 records（loadLatest 默认加载最近30天）
-  // 这样确保"近30日概况"统计的是实际加载的数据范围
-  const recent30Total = records.length;
 
   // 统计今日情感分布
   const todayNeg = todayRecords.filter(r => r.sentiment === 'negative').length;
   const todayPos = todayRecords.filter(r => r.sentiment === 'positive').length;
   const todayNeu = todayRecords.filter(r => r.sentiment === 'neutral').length;
-
-  // 统计近30日情感分布（基于全部 records）
-  const recent30Neg = records.filter(r => r.sentiment === 'negative').length;
-  const recent30Pos = records.filter(r => r.sentiment === 'positive').length;
-  const recent30Neu = records.filter(r => r.sentiment === 'neutral').length;
 
   // 统计今日来源
   const srcMap = {};
@@ -3796,17 +3807,17 @@ function renderSummary() {
   const beijingNow = new Date(utc + beijingOffset * 60000);
   const timeStr = String(beijingNow.getHours()).padStart(2, '0') + ':' + String(beijingNow.getMinutes()).padStart(2, '0');
 
-  // 统计近30日来源、分类、关键词（基于全部 records）
+  // 统计近30日来源、分类、关键词（基于日期筛选后的 filteredRecords）
   const recent30SrcMap = {};
-  records.forEach(r => { recent30SrcMap[r.sourceType] = (recent30SrcMap[r.sourceType] || 0) + 1; });
+  filteredRecords.forEach(r => { recent30SrcMap[r.sourceType] = (recent30SrcMap[r.sourceType] || 0) + 1; });
   const recent30TopSrc = Object.entries(recent30SrcMap).sort((a, b) => b[1] - a[1]).slice(0, 2).map(x => CONFIG.labels.source[x[0]] || x[0]);
 
   const recent30CatMap = {};
-  records.forEach(r => { const c = r.category || '其他'; recent30CatMap[c] = (recent30CatMap[c] || 0) + 1; });
+  filteredRecords.forEach(r => { const c = r.category || '其他'; recent30CatMap[c] = (recent30CatMap[c] || 0) + 1; });
   const recent30TopCat = Object.entries(recent30CatMap).sort((a, b) => b[1] - a[1]).slice(0, 2).map(x => CONFIG.labels.category[x[0]] || x[0]);
 
   const recent30KwMap = {};
-  records.forEach(r => {
+  filteredRecords.forEach(r => {
     const kws = (r.searchKeyword && r.searchKeyword.trim()) ? [r.searchKeyword.trim()] : (r.keywords || []);
     kws.forEach(k => { recent30KwMap[k] = (recent30KwMap[k] || 0) + 1; });
   });
@@ -3839,11 +3850,11 @@ function renderSummary() {
     if (sentimentParts.length > 0) text += '，' + sentimentParts.join('，');
     text += '。';
 
-    // 24小时内新增（从全部 records 中筛选今天和昨天的数据）
+    // 24小时内新增（基于 d.date，从 filteredRecords 中筛选今天和昨天的数据）
     const yesterday = getDateStrBefore(today, 1);
-    const last24hRecords = records.filter(r => {
-      const ft = (r.collectedAt || r.fetchTime || '').toString().slice(0, 10);
-      return ft === today || ft === yesterday;
+    const last24hRecords = filteredRecords.filter(r => {
+      const rDate = (r.date || '').toString().slice(0, 10);
+      return rDate === today || rDate === yesterday;
     });
     if (last24hRecords.length > 0) {
       text += '24小时内新增 ' + last24hRecords.length + ' 条。';
