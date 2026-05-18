@@ -3749,12 +3749,24 @@ function renderSummary() {
     return ft === today;
   });
   const todayTotal = todayRecords.length;
-  const total = records.length;
+
+  // 筛选近30日数据
+  const daysAgo30 = getDateStrBefore(today, 29);
+  const recent30Records = records.filter(r => {
+    const ft = (r.collectedAt || r.fetchTime || '').toString().slice(0, 10);
+    return ft >= daysAgo30 && ft <= today;
+  });
+  const recent30Total = recent30Records.length;
 
   // 统计今日情感分布
   const todayNeg = todayRecords.filter(r => r.sentiment === 'negative').length;
   const todayPos = todayRecords.filter(r => r.sentiment === 'positive').length;
   const todayNeu = todayRecords.filter(r => r.sentiment === 'neutral').length;
+
+  // 统计近30日情感分布
+  const recent30Neg = recent30Records.filter(r => r.sentiment === 'negative').length;
+  const recent30Pos = recent30Records.filter(r => r.sentiment === 'positive').length;
+  const recent30Neu = recent30Records.filter(r => r.sentiment === 'neutral').length;
 
   // 统计今日来源
   const srcMap = {};
@@ -3781,10 +3793,6 @@ function renderSummary() {
     return scoreB - scoreA;
   }).slice(0, 3);
 
-  // 统计全量数据的情感
-  const allNeg = records.filter(r => r.sentiment === 'negative').length;
-  const allPos = records.filter(r => r.sentiment === 'positive').length;
-
   // 获取最新数据时间
   const now = new Date();
   const beijingOffset = 8 * 60;
@@ -3795,22 +3803,24 @@ function renderSummary() {
   // 生成简报文本
   let text = '';
 
-  if (todayTotal === 0 && total === 0) {
-    text = '📊 <strong>' + today + '</strong> 舆情日报<br><br>今日暂无相关舆情数据。系统将持续监控中。';
-  } else if (todayTotal === 0 && total > 0) {
-    text = '📊 <strong>' + today + '</strong> 舆情日报<br><br>';
-    text += '今日无新增采集数据。当前共监测 <strong>' + total + '</strong> 条历史舆情';
-    if (allNeg > 0) text += '，其中负面舆情 <strong>' + allNeg + '</strong> 条需关注';
+  if (todayTotal === 0 && recent30Total === 0) {
+    text = '今日暂无相关舆情数据。系统将持续监控中。';
+  } else if (todayTotal === 0 && recent30Total > 0) {
+    text = '今日无新增采集数据。';
+    text += '<br><br>📊 <strong>近30日概况</strong>：共监测 <strong>' + recent30Total + '</strong> 条舆情';
+    if (recent30Neg > 0) text += '，其中 <span style="color:#c41e3a;font-weight:bold">负面 ' + recent30Neg + ' 条</span>需关注';
+    if (recent30Pos > 0) text += '，正面 ' + recent30Pos + ' 条';
+    if (recent30Neu > 0) text += '，中性 ' + recent30Neu + ' 条';
     text += '。';
-    if (topKw.length > 0) text += '<br>持续关注热词：' + topKw.map(k => '「' + k + '」').join(' ');
   } else {
-    text = '📊 <strong>' + today + '</strong> 舆情日报<br><br>';
-    text += '今日新增采集 <strong>' + todayTotal + '</strong> 条舆情';
+    text = '<strong>今日采集</strong>：新增 <strong>' + todayTotal + '</strong> 条舆情';
     if (todayNeg > 0) text += '，其中 <span style="color:#c41e3a;font-weight:bold">负面 ' + todayNeg + ' 条</span>';
     if (todayPos > 0) text += '，<span style="color:#4caf50">正面 ' + todayPos + ' 条</span>';
     if (todayNeu > 0) text += '，中性 ' + todayNeu + ' 条';
     text += '。';
-    text += '累计监测 <strong>' + total + '</strong> 条。';
+    text += '<br><br>📊 <strong>近30日概况</strong>：共监测 <strong>' + recent30Total + '</strong> 条舆情';
+    if (recent30Neg > 0) text += '，其中负面 ' + recent30Neg + ' 条';
+    text += '。';
 
     if (topSrc.length > 0) {
       text += '<br>📌 数据来源：' + topSrc.join('、');
